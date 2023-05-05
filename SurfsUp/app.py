@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 # Database Setup
 #################################################
 db_path = Path(__file__).parent / "Resources/hawaii.sqlite"
-engine = create_engine("sqlite:///" + str(db_path))
+# threading error fix: https://stackoverflow.com/questions/48218065/objects-created-in-a-thread-can-only-be-used-in-that-same-thread
+engine = create_engine("sqlite:///" + str(db_path),
+                       connect_args={'check_same_thread': False})
+
 # reflect the database and tables
 Base = automap_base()
 Base.prepare(autoload_with=engine)
@@ -22,6 +25,28 @@ Station = Base.classes["station"]
 
 # Create our session (link) from Python to the DB
 session = Session(bind=engine)
+
+#####################################################################
+# Create Constants
+#####################################################################
+def most_active_station() -> str:
+    """Gives the most active station from the database
+    :return: string station
+    """
+    active_stations = session.query(Measurement.station,
+                                    func.count(Measurement.station).label("count"))\
+                             .join(Station, Measurement.station == Station.station)\
+                             .group_by(Measurement.station)\
+                             .order_by(desc("count"))\
+                             .all()
+    return active_stations[0].station  # selecting from named tuple
+
+
+# Constants
+MOST_RECENT_DATE = dt.datetime.strptime(session.query(func.max(Measurement.date)).scalar(), r"%Y-%m-%d").date()
+ONE_YEAR_PRIOR_DATE = MOST_RECENT_DATE - dt.timedelta(days=365)
+MOST_ACTIVE_STATION = most_active_station()
+
 
 #################################################
 # Flask Setup
@@ -62,11 +87,9 @@ def precipitation():
 
     :return: json precipitation data
     """
-    most_recent_date = session.query(func.max(Measurement.date)).scalar()
-    one_year_prior = dt.datetime.strptime(most_recent_date, r"%Y-%m-%d").date() - dt.timedelta(days=365)
     last_12_months = session.query(Measurement.date,
                                    Measurement.prcp)\
-                        .where(Measurement.date >= one_year_prior)\
+                        .where(Measurement.date >= ONE_YEAR_PRIOR_DATE)\
                         .order_by(Measurement.date)\
                         .all()
     
@@ -76,12 +99,20 @@ def precipitation():
 
 @app.route("/api/v1.0/stations")
 def stations():
-    pass
+    stations = session.query(Station.station).all()
+    stations_dict = {"stations": [value for (value,) in stations]}
+    return jsonify(stations_dict)
 
 
 @app.route("/api/v1.0/tobs")
 def tobs():
-    pass
+    most_active_tobs_data = session.query(Measurement.date,
+                                          Measurement.tobs)\
+                                   .where(Measurement.date >= ONE_YEAR_PRIOR_DATE,
+                                          Measurement.station == MOST_ACTIVE_STATION)\
+                                   .all()
+    most_active_tobs_dict = [{item.date: item.tobs} for item in most_active_tobs_data]
+    return jsonify(most_active_tobs_dict)
 
 
 @app.route("/api/v1.0/<start>")
@@ -94,5 +125,25 @@ def start_end_range():
     pass
 
 
+# Other Functions
+def last_date() -> dt.date:
+    """Gives the last date of measurements in the database.
+
+    :return: date value
+    """
+    most_recent_date = session.query(func.max(Measurement.date)).scalar()
+    return dt.datetime.strptime(most_recent_date, r"%Y-%m-%d").date()
+
+
+def one_year_prior_date(date_value: dt.date) -> dt.date:
+    """Gives a date 1 year before the given date
+
+    :param date_value: date to subtract 1 year from
+    :return: 1 year older date
+    """
+    return date_value - dt.timedelta(days=365)
+
+
 if __name__ == "__main__":
     app.run(debug=True)
+    session.close()
