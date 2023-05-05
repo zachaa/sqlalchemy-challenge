@@ -1,4 +1,5 @@
 import datetime as dt
+from typing import List, Dict
 from pathlib import Path
 
 from flask import Flask, jsonify
@@ -25,6 +26,7 @@ Station = Base.classes["station"]
 
 # Create our session (link) from Python to the DB
 session = Session(bind=engine)
+
 
 #####################################################################
 # Create Constants
@@ -68,14 +70,17 @@ def home():
           /api/v1.0/stations</br>
           /api/v1.0/tobs</br>
           /api/v1.0/&lt;start&gt;</br>
-          /api/v1.0/&lt;start&gt;/&lt;end&gt;
+          /api/v1.0/&lt;start&gt;/&lt;end&gt;</br>
+          </br>
+          &lt;start&gt; and &lt;end&gt; are dates that should be in the form "YYYY-MM-DD"</br>
+          Ex: 2016-05-04
           """
 
 
 @app.route("/api/v1.0/precipitation")
 def precipitation():
     """
-    Return the last 12 months of precipitation data
+    Return the last 12 months of precipitation data for all stations.
 
     Data in the form:
     [
@@ -99,6 +104,18 @@ def precipitation():
 
 @app.route("/api/v1.0/stations")
 def stations():
+    """Returns data with list of all stations
+
+    Data in the form:
+    {
+      "stations":[
+         "USC00519397",
+         ...
+      ]
+    }
+
+    :return: json data
+    """
     stations = session.query(Station.station).all()
     stations_dict = {"stations": [value for (value,) in stations]}
     return jsonify(stations_dict)
@@ -106,6 +123,18 @@ def stations():
 
 @app.route("/api/v1.0/tobs")
 def tobs():
+    """Returns temperature data for the most active station in the last year of the data set.
+
+    Data in the form:
+    [
+      {
+        "2016-08-23": 77.0
+      },
+      ...
+    ]
+
+    :return: json data
+    """
     most_active_tobs_data = session.query(Measurement.date,
                                           Measurement.tobs)\
                                    .where(Measurement.date >= ONE_YEAR_PRIOR_DATE,
@@ -116,32 +145,44 @@ def tobs():
 
 
 @app.route("/api/v1.0/<start>")
-def start():
-    pass
+def start(start: str):
+    """Return temperature data from the `start` date to the end of the data set.
+
+    :param start: string start date in YYYY-MM-DD form
+    :return: json data
+    """
+    # no date is after MOST_RECENT_DATE, so it can be the end date
+    data = temperature_date_range_data(start, MOST_RECENT_DATE)
+    return jsonify(data)
 
 
 @app.route("/api/v1.0/<start>/<end>")
-def start_end_range():
-    pass
+def start_end_range(start: str, end: str):
+    """Return temperature data in the date range `start` to `end`.
 
-
-# Other Functions
-def last_date() -> dt.date:
-    """Gives the last date of measurements in the database.
-
-    :return: date value
+    :param start: string start date in YYYY-MM-DD form
+    :param end: string end date in YYYY-MM-DD form
+    :return: json data
     """
-    most_recent_date = session.query(func.max(Measurement.date)).scalar()
-    return dt.datetime.strptime(most_recent_date, r"%Y-%m-%d").date()
+    data = temperature_date_range_data(start, end)
+    return jsonify(data)
 
 
-def one_year_prior_date(date_value: dt.date) -> dt.date:
-    """Gives a date 1 year before the given date
+def temperature_date_range_data(start: str, end: str) -> List[Dict[str, float]]:
+    """Calculates the Min, Max, Average of temperatures in the  date range `start` to `end`.
 
-    :param date_value: date to subtract 1 year from
-    :return: 1 year older date
+    :param start: string start date in YYYY-MM-DD form
+    :param end: string end date in YYYY-MM-DD form
+    :return: list containing dictionary  
     """
-    return date_value - dt.timedelta(days=365)
+    temp_data = session.query(func.min(Measurement.tobs).label("TMIN"),
+                                func.max(Measurement.tobs).label("TMAX"),
+                                func.avg(Measurement.tobs).label("TAVG"))\
+                        .where(Measurement.date >= start,
+                            Measurement.date <= end)\
+                        .one()
+    data = {"TMIN": temp_data.TMIN, "TMAX": temp_data.TMAX, "TAVG": temp_data.TAVG}
+    return data
 
 
 if __name__ == "__main__":
