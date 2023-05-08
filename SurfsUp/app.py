@@ -1,9 +1,9 @@
 import datetime as dt
-from typing import List, Dict
 from pathlib import Path
+from typing import Dict, Union
 
 from flask import Flask, jsonify
-from sqlalchemy import create_engine, desc, func, inspect
+from sqlalchemy import create_engine, desc, func
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,9 @@ session = Session(bind=engine)
 #####################################################################
 def most_active_station() -> str:
     """Gives the most active station from the database
+
+    Should be 'USC00519281'
+
     :return: string station
     """
     active_stations = session.query(Measurement.station,
@@ -157,7 +160,7 @@ def start(start: str):
 
 
 @app.route("/api/v1.0/<start>/<end>")
-def start_end_range(start: str, end: str):
+def start_end_range(start: str, end: Union[str, dt.date]):
     """Return temperature data in the date range `start` to `end`.
 
     :param start: string start date in YYYY-MM-DD form
@@ -168,7 +171,7 @@ def start_end_range(start: str, end: str):
     return jsonify(data)
 
 
-def temperature_date_range_data(start: str, end: str) -> List[Dict[str, float]]:
+def temperature_date_range_data(start: str, end: Union[str, dt.date]) -> Dict[str, float]:
     """Calculates the Min, Max, Average of temperatures in the  date range `start` to `end`.
 
     :param start: string start date in YYYY-MM-DD form
@@ -176,8 +179,8 @@ def temperature_date_range_data(start: str, end: str) -> List[Dict[str, float]]:
     :return: list containing dictionary  
     """
     temp_data = session.query(func.min(Measurement.tobs).label("TMIN"),
-                                func.max(Measurement.tobs).label("TMAX"),
-                                func.avg(Measurement.tobs).label("TAVG"))\
+                              func.max(Measurement.tobs).label("TMAX"),
+                              func.avg(Measurement.tobs).label("TAVG"))\
                         .where(Measurement.date >= start,
                             Measurement.date <= end)\
                         .one()
